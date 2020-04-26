@@ -1,16 +1,10 @@
+from glob import glob
 import numpy as np
 import os
 import random
-import tensorflow as tf
-from scipy import misc
-from functools import partial 
 import imageio
-import sys
-from sklearn.utils import shuffle as sf
+from sklearn.utils import shuffle
 
-def shuffle_along_axis(a, axis):
-    idx = np.random.rand(*a.shape).argsort(axis=axis)
-    return np.take_along_axis(a,idx,axis=axis)
 
 def get_images(paths, labels, nb_samples=None, shuffle=True):
     """
@@ -109,37 +103,37 @@ class DataGenerator(object):
         #### YOUR CODE GOES HERE ####
         all_image_batches = []
         all_label_batches = []
-        for i in range(batch_size):
-            image_batch = []
-            label_batch = []
-            img_path = []
-            paths = random.sample(folders,self.num_classes)
-            lp = get_images(paths,np.eye(self.num_classes), nb_samples = self.num_samples_per_class,shuffle=False)
 
-            for label, path in lp:
-                img_path.append(path)
-                image_batch.append(image_file_to_array(path,784))
-                label_batch.append(label)
-            print(img_path)
-            label_batch = np.reshape(np.vstack(label_batch),(self.num_samples_per_class, self.num_classes, self.num_classes),order='F')
-            img_path = np.reshape(np.vstack(img_path),(self.num_samples_per_class, self.num_classes, -1),order='F')
-            image_batch = np.reshape(np.vstack(img_path),(self.num_samples_per_class, self.num_classes, -1),order='F')
-            # label_batch = np.apply_along_axis(np.random.shuffle,2,label_batch)
-            print(img_path)
-            img_path = np.reshape(lp,(self.num_samples_per_class, self.num_classes, -1),order='F')
-            print(np.array(label_batch).shape)
-            all_label_batches.append(label_batch)
-            all_image_batches.append(image_batch)
-        all_label_batches = np.swapaxes(np.array(all_label_batches),1,2)
-        all_image_batches = np.swapaxes(np.array(all_image_batches),1,2)
+        for batch_idx in range(batch_size):
+            # 1. Sample N from folders
+            select_classes = random.sample(folders, self.num_classes)
+            # 2. Load K images of each N classes -> Total K x N images
+            one_hot_labels = np.identity(self.num_classes)  # Identity matrix, shape N, N
+            # SHOULD NOT set shuffle=True here !
+            labels_images = get_images(select_classes, one_hot_labels, self.num_samples_per_class, shuffle=False)
+            train_images, train_labels = [], []
+            test_images, test_labels = [], []
+            for sample_idx, (label, img_path) in enumerate(labels_images):
+                # Take the first image of each class (index is 0, N, 2N...) to test_set
+                if sample_idx % self.num_samples_per_class == 0:
+                    test_images.append(image_file_to_array(img_path, 784))
+                    test_labels.append(label)
+                else:
+                    train_images.append(image_file_to_array(img_path, 784))
+                    train_labels.append(label)
 
+            ## Now we shuffle train & test, then concatenate them together
+            train_images, train_labels = shuffle(train_images, train_labels)
+            test_images, test_labels = shuffle(test_images, test_labels)
 
+            labels = np.vstack(train_labels + test_labels).reshape((-1, self.num_classes, self.num_classes))  # K, N, N
+            images = np.vstack(train_images + test_images).reshape((self.num_samples_per_class, self.num_classes, -1))  # K x N x 784
+
+            all_image_batches.append(images)
+            all_label_batches.append(labels)
+
+        # 3. Return two numpy array (B, K, N, 784) and one-hot labels (B, K, N, N)
+        all_image_batches = np.stack(all_image_batches).astype(np.float32)
+        all_label_batches = np.stack(all_label_batches).astype(np.float32)
         #############################
-
-        return (all_image_batches, all_label_batches)
-
-def main():
-    dg = DataGenerator(4,2)
-    dg.sample_batch('train',1)
-if __name__ == '__main__':
-    main()
+        return all_image_batches, all_label_batches
